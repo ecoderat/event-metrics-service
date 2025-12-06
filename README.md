@@ -62,25 +62,34 @@ Use this to get a feel for ingestion throughput on your machine.
 
 ---
 
-## What a production version would add
+## Performance & database choice
 
-This v1 is intentionally simple. In a real high-scale environment, the architecture would typically evolve to:
+This service runs on a local Apple M4 machine with **24 GB RAM**.  
+With ~**20M rows** in the `events` table, typical metrics queries (filter by `event_name` and time range, `COUNT(*)` + `COUNT(DISTINCT user_id)`) behave roughly as follows:
 
-* **Durable queue** between API and storage
+| Time range | Query shape                              | Exec time (approx.) |
+| ---------- | ---------------------------------------- | ------------------- |
+| 1 day      | total + distinct users                   | ~0.5 s              |
+| 7 days     | total + distinct + hourly buckets        | ~2.0 s              |
+| 30 days    | total + distinct (optionally grouped)    | ~7–8 s              |
 
-  * API → Kafka/Redpanda
-  * Consumers → PostgreSQL (operational store) and/or ClickHouse (analytics)
-* **OLAP store for heavy metrics**
+For this assignment I scope the HTTP API to **short / medium windows** (e.g. up to 7 days).  
+This keeps `/metrics` usable (sub-second to ~2s) while being explicit that metrics are **not strictly real-time**, which is allowed by the requirements.
 
-  * Use **ClickHouse** for large-scale aggregations (COUNT, DISTINCT, GROUP BY over billions of rows)
-* **Cache layer**
+From a pure analytics perspective, an OLAP engine like **ClickHouse** would be a better long-term fit for:
 
-  * Redis to cache popular metrics responses (short TTL)
-  * Optionally use Redis for high-speed idempotency/dedup
-* **Database hardening**
+- wide time ranges (30–180+ days),
+- heavy `COUNT(DISTINCT user_id)` and time-bucketed aggregations over billions of rows.
 
-  * Time-based partitioning in PostgreSQL
-  * Read replicas for separating ingestion and read load
-  * More aggressive batching for inserts
+However, for this 48h assessment I chose **PostgreSQL** because:
 
-This project focuses on a clean, understandable baseline implementation first; the production-grade ideas above are future steps, not all implemented here.
+- I can use a **simple `UNIQUE (idempotency_key)` constraint** and `INSERT ... ON CONFLICT DO NOTHING` for idempotent ingestion.
+- The requirements explicitly say ingestion should be near real-time, but metrics don’t need to be fully real-time.
+- Keeping a single storage backend avoids introducing extra components (e.g. Redis + ClickHouse + queue) and complex consistency rules just to emulate uniqueness.
+
+In a production system, I would evolve this design to:
+
+- put a **durable queue** (e.g. Kafka) between the API and storage,
+- keep PostgreSQL as the **operational source of truth**,
+- stream the same events into **ClickHouse** for large-scale analytics,
+- and optionally add **Redis** as a cache in front of the metrics API for hot queries.
