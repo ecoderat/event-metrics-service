@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"event-metrics-service/internal/config"
+	"event-metrics-service/internal/controller"
 )
 
 // Server wraps the Fiber application setup.
@@ -16,7 +16,7 @@ type Server struct {
 }
 
 // NewServer configures routes and middleware.
-func NewServer(appCfg *config.Config) *Server {
+func NewServer(appCfg *config.Config, eventController controller.EventController) *Server {
 	isBenchmark := strings.ToLower(appCfg.AppMode) == "benchmark"
 	fiberCfg := fiber.Config{
 		DisableStartupMessage: true,
@@ -24,9 +24,11 @@ func NewServer(appCfg *config.Config) *Server {
 	}
 	app := fiber.New(fiberCfg)
 	if !isBenchmark {
-		app.Use(logger.New())
+		// app.Use(logger.New())
 	}
 	app.Use(recover.New())
+
+	app.Post("/events", eventController.CreateEvent)
 
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})

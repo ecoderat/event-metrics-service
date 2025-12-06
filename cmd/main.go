@@ -11,8 +11,11 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 
 	"event-metrics-service/internal/config"
+	"event-metrics-service/internal/controller"
 	"event-metrics-service/internal/db"
 	httpserver "event-metrics-service/internal/http"
+	"event-metrics-service/internal/repository"
+	"event-metrics-service/internal/service"
 )
 
 func main() {
@@ -30,7 +33,12 @@ func main() {
 	}
 	defer pool.Close()
 
-	server := httpserver.NewServer(cfg)
+	repo := repository.NewEventRepository(pool)
+	worker := service.NewbatchEventWorker(repo, 10000, 1000, 1*time.Second)
+	eventService := service.NewEventService(repo, worker)
+	eventController := controller.NewEventController(eventService)
+
+	server := httpserver.NewServer(cfg, eventController)
 
 	go logRuntimeStats(ctx, cfg, pool)
 
