@@ -1,0 +1,6 @@
+development:
+  dialect: postgres
+  # Use localhost so migrations work from the host while docker-compose exposes db on 5432.
+  datasource: "postgres://event:event@localhost:5432/events?sslmode=disable"
+  dir: migrations
+  table: migrations
