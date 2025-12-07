@@ -222,15 +222,16 @@ The PostgreSQL numbers are kept in the benchmark table as a realistic baseline f
 For a real production system, the design could evolve along these lines:
 
 1. **Durable queue**
-   Introduce Kafka or RabbitMQ between the public API and the ingestion workers to absorb spikes and provide replay.
+   Replace the in-memory queue with Kafka or RabbitMQ.  
+   The API publishes events, a separate consumer batches them into ClickHouse, preventing data loss on crashes and enabling replay/backpressure.
 
-2. **Operational vs. analytical split**
+3. **Operational vs. analytical split**
    Keep an RDBMS (e.g. PostgreSQL) as the **transactional system of record** if needed, while ClickHouse serves as the **analytics backend**.
 
-3. **Caching hot queries**
+4. **Caching hot queries**
    Add Redis (or similar) in front of `/metrics` for dashboard-style, repeated queries.
 
-4. **Scaling out ClickHouse**
+5. **Scaling out ClickHouse**
    Use sharded / replicated ClickHouse clusters once data grows into the billions of rows and multi-node setups are required.
 
 This project keeps the implementation deliberately small and focused (single service + ClickHouse), while still showing a credible path to a production-grade, high-volume analytics stack.
