@@ -82,10 +82,10 @@ Expected:
 
 ### 1. Ingest event
 
-**POST** `/events`
+**POST** `/events`  
 Accepts a single event payload.
 
-Example:
+#### Request
 
 ```bash
 curl -X POST http://localhost:8080/events \
@@ -93,44 +93,101 @@ curl -X POST http://localhost:8080/events \
   -d '{
     "event_name": "product_view",
     "channel": "web",
-    "campaign_id": "cmp_123",
+    "campaign_id": "cmp_987",
     "user_id": "user_123",
-    "timestamp": "2025-12-06T10:00:00Z",
-    "tags": ["homepage", "seo"],
+    "timestamp": 1723475612,
+    "tags": ["electronics", "homepage", "flash_sale"],
     "metadata": {
+      "product_id": "prod-789",
+      "price": 129.99,
+      "currency": "TRY",
       "referrer": "google"
     }
   }'
+````
+
+#### Response
+
+```text
+202 Accepted
 ```
+
+---
 
 ### 2. Get metrics
 
 **GET** `/metrics`
-Returns aggregated metrics for a given time range and optional `event_name` filter.
+Returns aggregated metrics for a given event type, over a time range, with optional filters and grouping.
 
-Typical query parameters:
+#### Query parameters
 
-* `event_name` (optional) – filter by event type, e.g. `product_view`
-* `from` / `to` (optional) – ISO8601 timestamps or relative ranges (implementation-dependent)
-* `period` (optional shortcut) – e.g. `1d`, `7d`
+* `event_name` (**required**)
+  Name of the event to aggregate (e.g. `add_to_cart`, `product_view`).
 
-Example:
+* `channel` (optional)
+  Filter by channel (e.g. `web`, `mobile_app`).
+  If omitted, metrics are aggregated across **all channels**.
+
+* `group_by` (optional, default: `channel`)
+  Dimension used to group the results:
+
+  * `channel`
+  * `day`
+  * `hour`
+
+  If not provided, results are grouped by **channel**.
+
+* `from` (optional)
+  Start of the time range, as **Unix timestamp (seconds)**.
+
+* `to` (optional)
+  End of the time range, as **Unix timestamp (seconds)**.
+
+  If **both** `from` and `to` are omitted, the service uses the **last 30 days** up to “now” as the time window.
+
+#### Example request
 
 ```bash
-curl "http://localhost:8080/metrics?event_name=product_view&period=7d"
+curl "http://localhost:8080/metrics?event_name=add_to_cart&group_by=day&channel=web&from=1764450000&to=1764622800"
 ```
 
-Response (shape may vary slightly):
+#### Example response
 
 ```json
-[
-  {
-    "bucket": "2025-12-06T10:00:00Z",
-    "channel": "web",
-    "total_events": 1234,
-    "unique_users": 456
+{
+  "meta": {
+    "event_name": "add_to_cart",
+    "period": {
+      "start": "2025-11-29T21:00:00Z",
+      "end": "2025-12-01T21:00:00Z"
+    },
+    "filters": {
+      "channel": "web"
+    },
+    "group_by": "day"
+  },
+  "data": {
+    "total_event_count": 122790,
+    "unique_event_count": 39762,
+    "groups": [
+      {
+        "key": "2025-11-29",
+        "total_count": 7509,
+        "unique_user_count": 6847
+      },
+      {
+        "key": "2025-11-30",
+        "total_count": 61511,
+        "unique_user_count": 31465
+      },
+      {
+        "key": "2025-12-01",
+        "total_count": 53770,
+        "unique_user_count": 29617
+      }
+    ]
   }
-]
+}
 ```
 
 ---
