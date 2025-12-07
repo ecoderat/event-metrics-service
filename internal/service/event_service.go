@@ -95,10 +95,6 @@ func (s *eventService) ProcessEvent(ctx context.Context, event model.Event) (mod
 	return model.EventResult{Status: "created"}, nil
 }
 
-func (s *eventService) CreateEvent(ctx context.Context, input model.Event) error {
-	return nil
-}
-
 // ValidateTimestamp ensures timestamps are not too far in the future.
 func ValidateTimestamp(ts time.Time, now time.Time, tolerance time.Duration) error {
 	if tolerance <= 0 {

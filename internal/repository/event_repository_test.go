@@ -1,4 +1,3 @@
-// event_repository_test.go
 package repository
 
 import (
