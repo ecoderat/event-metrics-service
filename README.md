@@ -1,33 +1,70 @@
-# event-metrics-service
-`event-metrics-service` is a Go backend service for **high-throughput event ingestion** and **metric aggregation**.
+# Event Metrics Service
 
-- Accepts events over HTTP (e.g. `POST /events`)
-- Stores them in **ClickHouse** (ReplacingMergeTree)
-- Uses an **in-memory queue + worker pool** to batch inserts
-- Exposes aggregated metrics via `GET /metrics` (time range + event_name, total + unique users)
+![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)
+![ClickHouse](https://img.shields.io/badge/ClickHouse-OLAP-FFCC01?style=flat&logo=clickhouse)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat&logo=docker)
 
-This version focuses on a simple but realistic design: near real-time inserts, on-the-fly metrics directly from ClickHouse.
+`event-metrics-service` is a Go backend for **high-throughput event ingestion** and **near real-time metric aggregation**.
+
+It demonstrates a simple but realistic architecture that uses a columnar OLAP store (**ClickHouse**) for analytics, and compares it against a traditional row-store (**PostgreSQL**) on the same workload.
 
 ---
 
-## Run the app (Docker Compose)
+## 🚀 Features
 
-Prerequisites:
+- **High-throughput ingestion**  
+  HTTP `POST /events` endpoint + **in-memory queue + worker pool** pattern to batch inserts.
 
-- Docker
-- docker-compose
+- **OLAP storage in ClickHouse**  
+  Events are stored in ClickHouse using a `ReplacingMergeTree` table tuned for append-only event data and deduplication.
 
-Start the stack (API + ClickHouse):
+- **On-the-fly metrics**  
+  `GET /metrics` computes aggregates directly on ClickHouse (no pre-aggregated tables):  
+  total events (`COUNT(*)`) and unique users (`COUNT(DISTINCT user_id)`).
+
+- **Built-in load tester**  
+  A dedicated Go tool (run as a container) to simulate heavy traffic and duplicate submissions.
+
+---
+
+## 🏗 Architecture
+
+High-level data flow:
+
+1. **API layer**  
+   `POST /events` receives a single event JSON payload.
+
+2. **Buffering**  
+   The handler validates/parses the request and pushes events into a buffered Go channel (non-blocking from the client’s perspective).
+
+3. **Batch processing**  
+   Background workers drain the channel and insert batches into ClickHouse, reducing per-request overhead.
+
+4. **Querying**  
+   `GET /metrics` queries ClickHouse directly, aggregating over a requested time window and `event_name`.
+
+For this assessment, metrics focus on **short/medium windows** (e.g. up to 7 days) to keep response times in the **sub-second to ~2s** range while still working directly off raw event data.
+
+---
+
+## 🛠 Getting Started
+
+### Prerequisites
+
+- Docker  
+- Docker Compose
+
+### Run the stack
+
+Start the API and ClickHouse services. The database schema is applied automatically on startup.
 
 ```bash
 docker-compose up --build
 ````
 
-The service applies its ClickHouse schema on startup, so no separate migration step is required.
-
 By default the API will listen on `http://localhost:8080`.
 
-Basic sanity check:
+### Health check
 
 ```bash
 curl http://localhost:8080/health
@@ -41,142 +78,160 @@ Expected:
 
 ---
 
-## Benchmark (simple load test)
+## 🔌 API Reference
 
-A small Go tool is included to send events to the API.
+### 1. Ingest event
 
-From the benchmark tool directory (e.g. `tools/bench/`):
+**POST** `/events`
+Accepts a single event payload.
+
+Example:
 
 ```bash
-go run main.go \
-  -endpoint "events" \
-  -total 20000 \
-  -rate 2000
+curl -X POST http://localhost:8080/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_name": "product_view",
+    "channel": "web",
+    "campaign_id": "cmp_123",
+    "user_id": "user_123",
+    "timestamp": "2025-12-06T10:00:00Z",
+    "tags": ["homepage", "seo"],
+    "metadata": {
+      "referrer": "google"
+    }
+  }'
 ```
 
-This will:
+### 2. Get metrics
 
-* Send **20,000** events
-* At a target rate of **2,000 events/second**
-* Against the `/events` endpoint on the running service
+**GET** `/metrics`
+Returns aggregated metrics for a given time range and optional `event_name` filter.
 
-Use this to get a feel for ingestion throughput on your machine.
+Typical query parameters:
 
----
+* `event_name` (optional) – filter by event type, e.g. `product_view`
+* `from` / `to` (optional) – ISO8601 timestamps or relative ranges (implementation-dependent)
+* `period` (optional shortcut) – e.g. `1d`, `7d`
 
-# event-metrics-service
-`event-metrics-service` is a Go backend service for **high-throughput event ingestion** and **metric aggregation**.
-
-- Accepts events over HTTP (e.g. `POST /events`)
-- Stores them in **PostgreSQL**
-- Uses an **in-memory queue + worker pool** to insert into the DB
-- Exposes aggregated metrics via `GET /metrics` (time range + event_name, total + unique users)
-
-This version focuses on a simple but realistic design: near real-time inserts, on-the-fly metrics from PostgreSQL.
-
----
-
-## Run the app (Docker Compose)
-
-Prerequisites:
-
-- Docker
-- docker-compose
-
-Start the stack (API + PostgreSQL):
+Example:
 
 ```bash
-docker-compose up --build
-````
-
-By default the API will listen on `http://localhost:8080`.
-
-Basic sanity check:
-
-```bash
-curl http://localhost:8080/health
+curl "http://localhost:8080/metrics?event_name=product_view&period=7d"
 ```
 
-Expected:
+Response (shape may vary slightly):
 
 ```json
-{ "status": "ok" }
+[
+  {
+    "bucket": "2025-12-06T10:00:00Z",
+    "channel": "web",
+    "total_events": 1234,
+    "unique_users": 456
+  }
+]
 ```
 
 ---
 
-## Benchmark (simple load test)
+## ⚡ Benchmarking & Load Testing
 
-A small Go tool is included to send events to the API.
+A custom Go load tester is included and runs as a separate container in the same Docker network.
 
-From the benchmark tool directory (e.g. `tools/bench/`):
+### Run a load test
 
 ```bash
-go run main.go \
-  -endpoint "events" \
-  -total 20000 \
-  -rate 2000
+# Ensure the stack is running
+docker compose up --build -d
+
+# Execute the load tester inside the cluster
+docker compose exec load-tester sh -lc \
+  'go run main.go \
+    -endpoint http://app:8080/events \
+    -total 20000 \
+    -rate 2000 \
+    -duplication-percent 20'
 ```
 
-This will:
+This scenario:
 
-* Send **20,000** events
-* At a target rate of **2,000 events/second**
-* Against the `/events` endpoint on the running service
+* Sends **20,000 events**
+* Targets **2,000 req/s**
+* Reuses **20%** of the payloads (`-duplication-percent`) to simulate duplicate submissions and exercise ClickHouse deduplication.
 
-Use this to get a feel for ingestion throughput on your machine.
+Use this to get a feel for ingestion throughput and basic stability on your machine.
 
 ---
-## Performance & database choice
 
-### Query benchmark
+## 📊 Performance & Database Choice
 
 All benchmarks were run on a local **Apple M4** machine with **24 GB RAM**.
 
 With ~**20M rows** in the `events` table, typical metrics queries (filter by `event_name` and time range, `COUNT(*)` + `COUNT(DISTINCT user_id)`) behave roughly as follows:
 
-| ID     | Description                                           | Window | PostgreSQL Exec Time | ClickHouse Exec Time |
-|--------|-------------------------------------------------------|--------|----------------------|----------------------|
-| q1-1d  | Hourly `product_view` metrics, grouped by `channel`   | 1 day  | ~466 ms              | N/A                  |
-| q1-7d  | Hourly `product_view` metrics, grouped by `channel`   | 7 days | ~1.96 s              | N/A                  |
-| q1-30d | Hourly `product_view` metrics, grouped by `channel`   | 30 days| ~7.77 s              | **≈180 ms**          |
-| q2-7d  | Per-channel total events + unique users               | 7 days | ~1.98 s              | **≈140 ms**          |
-| q2-30d | Per-channel total events + unique users               | 30 days| N/A                  | **≈340 ms**          |
-| q3-1d  | Daily metrics per `event_name` + unique users         | 1 day  | ~493 ms              | N/A                  |
-| q3-7d  | Daily metrics per `event_name` + unique users         | 7 days | ~2.02 s              | **≈130 ms**          |
-| q3-30d | Daily metrics per `event_name` + unique users         | 30 days| N/A                  | **≈50 ms**           |
+| ID     | Description                                         | Window  | PostgreSQL Exec Time | ClickHouse Exec Time |
+| ------ | --------------------------------------------------- | ------- | -------------------- | -------------------- |
+| q1-1d  | Hourly `product_view` metrics, grouped by `channel` | 1 day   | ~466 ms              | N/A                  |
+| q1-7d  | Hourly `product_view` metrics, grouped by `channel` | 7 days  | ~1.96 s              | N/A                  |
+| q1-30d | Hourly `product_view` metrics, grouped by `channel` | 30 days | ~7.77 s              | **≈180 ms**          |
+| q2-7d  | Per-channel total events + unique users             | 7 days  | ~1.98 s              | **≈140 ms**          |
+| q2-30d | Per-channel total events + unique users             | 30 days | N/A                  | **≈340 ms**          |
+| q3-1d  | Daily metrics per `event_name` + unique users       | 1 day   | ~493 ms              | N/A                  |
+| q3-7d  | Daily metrics per `event_name` + unique users       | 7 days  | ~2.02 s              | **≈130 ms**          |
+| q3-30d | Daily metrics per `event_name` + unique users       | 30 days | N/A                  | **≈50 ms**           |
 
-> In short, queries that take **2–8 seconds** on PostgreSQL drop into the
-> **50–340 ms** range on ClickHouse on the same dataset  
-> (roughly a **10–30× speed-up** for these workloads).
+> **Summary:** Analytical queries that take **2–8 seconds** on PostgreSQL drop into the
+> **50–340 ms** range on ClickHouse on the same dataset (roughly **10–30×** faster for this workload).
 
-For this assignment, I scope the HTTP API to **short / medium time windows** (e.g. up to 7 days).  
-This keeps `/metrics` responses in the **sub-second to ~2s** range on PostgreSQL, while being explicit that metrics are **not strictly real-time**, which is acceptable for the requirements.
+The exact SQL used for these benchmarks (for both PostgreSQL and ClickHouse) is kept in a separate file to keep this README compact:
 
-From a pure analytics perspective, an OLAP engine like **ClickHouse** is a much better long-term fit for:
+* 👉 [`docs/queries.md`](docs/queries.md)
 
-- wide time ranges (30–180+ days),
-- heavy `COUNT(DISTINCT user_id)` and time-bucketed aggregations,
-- and data volumes in the hundreds of millions / billions of rows.
+---
+
+## 💡 Architectural Decisions
 
 ### Why PostgreSQL first, then ClickHouse?
 
-This assessment intentionally starts with a single `events` table in PostgreSQL.  
-The first goal is to keep the design **as simple as possible**:
+As a baseline, the workload was first modelled on a single `events` table in PostgreSQL. This made it easy to:
 
-- ingest events via a JSON HTTP API,
-- enforce idempotency with a plain `UNIQUE (idempotency_key)` constraint and  
-  `INSERT ... ON CONFLICT DO NOTHING`,
-- and run the required metrics queries directly on the same table.
+* validate the event schema and HTTP API,
+* experiment with idempotent ingestion using a simple
+  `UNIQUE (idempotency_key)` + `INSERT ... ON CONFLICT DO NOTHING`,
+* and understand how far a single relational table can go for mixed
+  write-heavy + read-heavy analytics.
 
-As the dataset grows into the millions of rows, PostgreSQL begins to show limits for this pattern:
+Once the dataset reached the millions of rows, PostgreSQL started to show limits for this pattern:
 
-- Complex analytical queries over 7–30 day windows start taking **2–8 seconds**.
-- The same table serves both **heavy inserts** and **read-intensive analytics**, increasing I/O and planning overhead.
-- A row-store is not ideal for wide, read-heavy, append-only event data.
+* Complex aggregations over 7–30 day windows took **2–8 seconds**.
+* The same table served both **heavy inserts** and **read-intensive analytics**, increasing I/O and planning overhead.
+* Row-oriented storage is not ideal for wide, append-only event streams with frequent `COUNT(DISTINCT ...)` and time-bucketing.
 
-To explore the scaling path, I mirrored the same data into ClickHouse and ran the exact same queries on a `ReplacingMergeTree`-based `events` table. On the same volume:
+To explore a more scalable option, the same data and queries were ported to a `ReplacingMergeTree`-based `events` table in ClickHouse. On the same volume:
 
-- Hourly `product_view` metrics for 30 days dropped from ~7.7 s to **≈180 ms**.
-- Channel-level aggregates over 7 days dropped from ~2 s to **≈140 ms**.
-- Daily event metrics over 30 days run in **≈50–130 ms**.
+* Hourly `product_view` metrics for 30 days dropped from ~7.7 s to **≈180 ms**.
+* Channel-level aggregates over 7 days dropped from ~2 s to **≈140 ms**.
+* Daily event metrics over 30 days run in **≈50–130 ms**.
+
+In this repository, ClickHouse is the **primary backing store** for events and metrics.
+The PostgreSQL numbers are kept in the benchmark table as a realistic baseline for how a traditional row-store behaves under the same workload.
+
+### Production evolution path
+
+For a real production system, the design could evolve along these lines:
+
+1. **Durable queue**
+   Introduce Kafka or RabbitMQ between the public API and the ingestion workers to absorb spikes and provide replay.
+
+2. **Operational vs. analytical split**
+   Keep an RDBMS (e.g. PostgreSQL) as the **transactional system of record** if needed, while ClickHouse serves as the **analytics backend**.
+
+3. **Caching hot queries**
+   Add Redis (or similar) in front of `/metrics` for dashboard-style, repeated queries.
+
+4. **Scaling out ClickHouse**
+   Use sharded / replicated ClickHouse clusters once data grows into the billions of rows and multi-node setups are required.
+
+This project keeps the implementation deliberately small and focused (single service + ClickHouse), while still showing a credible path to a production-grade, high-volume analytics stack.
+
