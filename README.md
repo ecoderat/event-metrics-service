@@ -13,7 +13,7 @@ It demonstrates a simple but realistic architecture that uses a columnar OLAP st
 ## 🚀 Features
 
 - **High-throughput ingestion**  
-  HTTP `POST /events` endpoint + **in-memory queue + worker pool** pattern to batch inserts.
+  HTTP `POST /events` endpoint + **in-memory queue** pattern to batch inserts.
 
 - **OLAP storage in ClickHouse**  
   Events are stored in ClickHouse using a `ReplacingMergeTree` table tuned for append-only event data and deduplication.
