@@ -21,3 +21,8 @@ func (m *Service) ProcessEvent(ctx context.Context, event model.Event) (model.Ev
 	args := m.Called(ctx, event)
 	return args.Get(0).(model.EventResult), args.Error(1)
 }
+
+func (m *Service) GetMetrics(ctx context.Context, filter model.MetricsFilter) (model.MetricsResponse, error) {
+	args := m.Called(ctx, filter)
+	return args.Get(0).(model.MetricsResponse), args.Error(1)
+}

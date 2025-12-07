@@ -29,6 +29,7 @@ type eventService struct {
 type EventService interface {
 	BuildEvent(req model.EventRequest) (model.Event, error)
 	ProcessEvent(ctx context.Context, event model.Event) (model.EventResult, error)
+	GetMetrics(ctx context.Context, filter model.MetricsFilter) (model.MetricsResponse, error)
 }
 
 // NewEventService constructs an eventService.
@@ -95,6 +96,65 @@ func (s *eventService) ProcessEvent(ctx context.Context, event model.Event) (mod
 	return model.EventResult{Status: "created"}, nil
 }
 
+// GetMetrics validates filters, sets defaults, and delegates aggregation to the repository.
+func (s *eventService) GetMetrics(ctx context.Context, filter model.MetricsFilter) (model.MetricsResponse, error) {
+	if filter.EventName == "" {
+		return model.MetricsResponse{}, &ValidationError{Message: "event_name is required"}
+	}
+
+	if filter.GroupBy == "" {
+		filter.GroupBy = "channel"
+	}
+
+	if !isSupportedGroupBy(filter.GroupBy) {
+		return model.MetricsResponse{}, &ValidationError{Message: "unsupported group_by"}
+	}
+
+	now := s.now().UTC()
+	if filter.To.IsZero() {
+		filter.To = now
+	} else {
+		filter.To = filter.To.UTC()
+	}
+
+	if filter.From.IsZero() {
+		filter.From = filter.To.Add(-30 * 24 * time.Hour)
+	} else {
+		filter.From = filter.From.UTC()
+	}
+
+	if filter.From.After(filter.To) {
+		return model.MetricsResponse{}, &ValidationError{Message: "from must be before to"}
+	}
+
+	total, unique, groups, err := s.repo.FetchMetrics(ctx, filter)
+	if err != nil {
+		return model.MetricsResponse{}, err
+	}
+
+	resp := model.MetricsResponse{
+		Meta: model.MetricsMeta{
+			EventName: filter.EventName,
+			Period: model.MetricsPeriod{
+				Start: filter.From.UTC().Format(time.RFC3339),
+				End:   filter.To.UTC().Format(time.RFC3339),
+			},
+			GroupBy: filter.GroupBy,
+		},
+		Data: model.MetricsData{
+			TotalEventCount:  uint64(total),
+			UniqueEventCount: uint64(unique),
+			Groups:           groups,
+		},
+	}
+
+	if filter.Channel != nil && *filter.Channel != "" {
+		resp.Meta.Filters = map[string]any{"channel": *filter.Channel}
+	}
+
+	return resp, nil
+}
+
 // ValidateTimestamp ensures timestamps are not too far in the future.
 func ValidateTimestamp(ts time.Time, now time.Time, tolerance time.Duration) error {
 	if tolerance <= 0 {
@@ -104,4 +164,13 @@ func ValidateTimestamp(ts time.Time, now time.Time, tolerance time.Duration) err
 		return errors.New("timestamp cannot be in the future")
 	}
 	return nil
+}
+
+func isSupportedGroupBy(group string) bool {
+	switch group {
+	case "channel", "hour", "day":
+		return true
+	default:
+		return false
+	}
 }

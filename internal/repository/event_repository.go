@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"event-metrics-service/internal/model"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 // EventRepository defines database operations for events.
@@ -19,7 +21,7 @@ type EventRepository interface {
 	CreateBatch(ctx context.Context, events []model.Event) error
 
 	// FetchMetrics aggregates data based on filters.
-	FetchMetrics(ctx context.Context, filter model.MetricsFilter) (int64, int64, []model.MetricsGroup, error)
+	FetchMetrics(ctx context.Context, filter model.MetricsFilter) (uint64, uint64, []model.MetricsGroup, error)
 }
 
 type eventRepository struct {
@@ -91,8 +93,54 @@ func (r *eventRepository) CreateBatch(ctx context.Context, events []model.Event)
 	return nil
 }
 
-func (r *eventRepository) FetchMetrics(ctx context.Context, filter model.MetricsFilter) (int64, int64, []model.MetricsGroup, error) {
-	return 0, 0, nil, nil
+func (r *eventRepository) FetchMetrics(ctx context.Context, filter model.MetricsFilter) (uint64, uint64, []model.MetricsGroup, error) {
+	whereParts := []string{"event_name = ?"}
+	args := []any{filter.EventName}
+
+	if !filter.From.IsZero() {
+		whereParts = append(whereParts, "ts >= ?")
+		args = append(args, filter.From)
+	}
+
+	if !filter.To.IsZero() {
+		whereParts = append(whereParts, "ts <= ?")
+		args = append(args, filter.To)
+	}
+
+	if filter.Channel != nil && *filter.Channel != "" {
+		whereParts = append(whereParts, "channel = ?")
+		args = append(args, *filter.Channel)
+	}
+
+	where := ""
+	if len(whereParts) > 0 {
+		where = "WHERE " + strings.Join(whereParts, " AND ")
+	}
+
+	var totalCount, uniqueCount uint64
+	totalsQuery := fmt.Sprintf("SELECT COUNT(*), COUNT(DISTINCT user_id) FROM events %s", where)
+	row := r.conn.QueryRow(ctx, totalsQuery, args...)
+	if err := row.Scan(&totalCount, &uniqueCount); err != nil {
+		return 0, 0, nil, fmt.Errorf("query totals: %w", err)
+	}
+
+	groupQuery, err := buildGroupQuery(filter.GroupBy, where)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+
+	rows, err := r.conn.Query(ctx, groupQuery, args...)
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("query groups: %w", err)
+	}
+	defer rows.Close()
+
+	groups, err := scanMetricGroups(rows)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+
+	return totalCount, uniqueCount, groups, nil
 }
 
 func buildGroupQuery(groupBy, where string) (string, error) {
@@ -104,15 +152,36 @@ func buildGroupQuery(groupBy, where string) (string, error) {
 			where), nil
 	case "hour":
 		return fmt.Sprintf(
-			"SELECT to_char(to_timestamp(ts), 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"'), COUNT(*), COUNT(DISTINCT user_id) FROM events %s GROUP BY 1 ORDER BY 1",
+			"SELECT formatDateTime(ts, '%%Y-%%m-%%dT%%H:00:00Z'), COUNT(*), COUNT(DISTINCT user_id) FROM events %s GROUP BY 1 ORDER BY 1",
 			where), nil
 	case "day":
 		return fmt.Sprintf(
-			"SELECT to_char(to_timestamp(ts), 'YYYY-MM-DD'), COUNT(*), COUNT(DISTINCT user_id) FROM events %s GROUP BY 1 ORDER BY 1",
+			"SELECT formatDateTime(ts, '%%Y-%%m-%%d'), COUNT(*), COUNT(DISTINCT user_id) FROM events %s GROUP BY 1 ORDER BY 1",
 			where), nil
 	default:
 		return "", fmt.Errorf("unsupported group_by: %s", groupBy)
 	}
+}
+
+func scanMetricGroups(rows driver.Rows) ([]model.MetricsGroup, error) {
+	var groups []model.MetricsGroup
+	for rows.Next() {
+		var key string
+		var total, unique uint64
+		if err := rows.Scan(&key, &total, &unique); err != nil {
+			return nil, fmt.Errorf("scan group: %w", err)
+		}
+		groups = append(groups, model.MetricsGroup{
+			Key:             key,
+			TotalCount:      total,
+			UniqueUserCount: unique,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate groups: %w", err)
+	}
+	return groups, nil
 }
 
 func marshalMetadata(metadata map[string]interface{}) (string, error) {

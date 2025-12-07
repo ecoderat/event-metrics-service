@@ -26,8 +26,8 @@ func (m *Repository) CreateBatch(ctx context.Context, events []model.Event) erro
 	return args.Error(0)
 }
 
-func (m *Repository) FetchMetrics(ctx context.Context, filter model.MetricsFilter) (int64, int64, []model.MetricsGroup, error) {
+func (m *Repository) FetchMetrics(ctx context.Context, filter model.MetricsFilter) (uint64, uint64, []model.MetricsGroup, error) {
 	args := m.Called(ctx, filter)
 	// Return type casting requires caution; ensure mocks are set up correctly in tests
-	return args.Get(0).(int64), args.Get(1).(int64), args.Get(2).([]model.MetricsGroup), args.Error(3)
+	return args.Get(0).(uint64), args.Get(1).(uint64), args.Get(2).([]model.MetricsGroup), args.Error(3)
 }

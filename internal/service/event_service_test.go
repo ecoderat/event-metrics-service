@@ -11,6 +11,7 @@ import (
 	mockrepository "event-metrics-service/internal/testdata/mockrepository"
 	mockworker "event-metrics-service/internal/testdata/mockworker"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -150,6 +151,55 @@ func (s *EventServiceTestSuite) TestProcessEvent() {
 
 	// Assert that the mock method was actually called
 	s.worker.AssertExpectations(s.T())
+}
+
+func (s *EventServiceTestSuite) TestGetMetrics_Validation() {
+	_, err := s.service.GetMetrics(context.Background(), model.MetricsFilter{})
+	s.Error(err)
+	s.IsType(&ValidationError{}, err)
+}
+
+func (s *EventServiceTestSuite) TestGetMetrics_Success() {
+	ctx := context.Background()
+	now := time.Unix(2000, 0).UTC()
+	s.service.now = func() time.Time { return now }
+
+	filter := model.MetricsFilter{
+		EventName: "signup",
+	}
+	expectedFilter := model.MetricsFilter{
+		EventName: "signup",
+		GroupBy:   "channel",
+		To:        now,
+		From:      now.Add(-30 * 24 * time.Hour),
+	}
+
+	groups := []model.MetricsGroup{{Key: "web", TotalCount: 8, UniqueUserCount: 2}}
+	s.repo.On("FetchMetrics", mock.Anything, expectedFilter).Return(uint64(10), uint64(3), groups, nil)
+
+	resp, err := s.service.GetMetrics(ctx, filter)
+
+	s.NoError(err)
+	s.Equal(uint64(10), resp.Data.TotalEventCount)
+	s.Equal(uint64(3), resp.Data.UniqueEventCount)
+	s.Equal("channel", resp.Meta.GroupBy)
+	s.Equal(now.Add(-30*24*time.Hour).Format(time.RFC3339), resp.Meta.Period.Start)
+	s.Equal(now.Format(time.RFC3339), resp.Meta.Period.End)
+	s.Equal(groups, resp.Data.Groups)
+}
+
+func (s *EventServiceTestSuite) TestGetMetrics_InvalidGroupBy() {
+	_, err := s.service.GetMetrics(context.Background(), model.MetricsFilter{EventName: "signup", GroupBy: "unknown"})
+	s.Error(err)
+	s.IsType(&ValidationError{}, err)
+}
+
+func (s *EventServiceTestSuite) TestGetMetrics_FromAfterTo() {
+	from := time.Unix(20, 0).UTC()
+	to := time.Unix(10, 0).UTC()
+	_, err := s.service.GetMetrics(context.Background(), model.MetricsFilter{EventName: "signup", From: from, To: to})
+	s.Error(err)
+	s.IsType(&ValidationError{}, err)
 }
 
 // TestValidateTimestamp_Helper tests the standalone helper function logic.

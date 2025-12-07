@@ -29,8 +29,8 @@ type Event struct {
 
 // EventResult describes the outcome of an insert.
 type EventResult struct {
-	Status string `json:"status"`
-	ID     *int64 `json:"id,omitempty"`
+	Status string  `json:"status"`
+	ID     *uint64 `json:"id,omitempty"`
 }
 
 // MetricsFilter represents metrics query filters.
@@ -45,18 +45,33 @@ type MetricsFilter struct {
 // MetricsGroup is a grouped metrics result.
 type MetricsGroup struct {
 	Key             string `json:"key"`
-	TotalCount      int64  `json:"total_count"`
-	UniqueUserCount int64  `json:"unique_user_count"`
+	TotalCount      uint64 `json:"total_count"`
+	UniqueUserCount uint64 `json:"unique_user_count"`
 }
 
 // MetricsResponse is returned to clients for metrics queries.
 type MetricsResponse struct {
-	EventName       string                 `json:"event_name"`
-	From            int64                  `json:"from"`
-	To              int64                  `json:"to"`
-	Filter          map[string]interface{} `json:"filter,omitempty"`
-	TotalCount      int64                  `json:"total_count"`
-	UniqueUserCount int64                  `json:"unique_user_count"`
-	GroupBy         string                 `json:"group_by,omitempty"`
-	Groups          []MetricsGroup         `json:"groups,omitempty"`
+	Meta MetricsMeta `json:"meta"`
+	Data MetricsData `json:"data"`
+}
+
+// MetricsMeta contains metadata about the metrics query.
+type MetricsMeta struct {
+	EventName string                 `json:"event_name"`
+	Period    MetricsPeriod          `json:"period"`
+	Filters   map[string]interface{} `json:"filters,omitempty"`
+	GroupBy   string                 `json:"group_by,omitempty"`
+}
+
+// MetricsPeriod captures the time window.
+type MetricsPeriod struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+// MetricsData holds aggregated values.
+type MetricsData struct {
+	TotalEventCount  uint64         `json:"total_event_count"`
+	UniqueEventCount uint64         `json:"unique_event_count"`
+	Groups           []MetricsGroup `json:"groups,omitempty"`
 }

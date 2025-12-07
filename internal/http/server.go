@@ -24,6 +24,7 @@ func NewServer(appCfg *config.Config, eventController controller.EventController
 	app.Use(recover.New())
 
 	app.Post("/events", eventController.CreateEvent)
+	app.Get("/metrics", eventController.GetMetrics)
 
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})

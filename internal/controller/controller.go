@@ -1,10 +1,15 @@
 package controller
 
 import (
+	"log"
+	"strconv"
+	"time"
+
 	"event-metrics-service/internal/model"
 	"event-metrics-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/utils"
 )
 
 type EventController interface {
@@ -44,5 +49,63 @@ func (h *eventController) CreateEvent(c *fiber.Ctx) error {
 
 // GetMetrics returns aggregated metrics for events.
 func (h *eventController) GetMetrics(c *fiber.Ctx) error {
-	return nil
+	log.Println("Received GetMetrics request")
+	filter, err := buildMetricsFilter(c)
+	if err != nil {
+		return err
+	}
+	log.Printf("Metrics filtered: %+v\n", filter)
+	log.Println("Fetching metrics from service")
+	resp, svcErr := h.eventService.GetMetrics(c.Context(), filter)
+	if svcErr != nil {
+		if _, ok := svcErr.(*service.ValidationError); ok {
+			log.Printf("Validation error: %v\n", svcErr)
+			return fiber.NewError(fiber.StatusBadRequest, svcErr.Error())
+		}
+		log.Printf("Service error: %v\n", svcErr)
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to fetch metrics")
+	}
+	log.Println("Metrics fetched successfully")
+
+	return c.JSON(resp)
+}
+
+func buildMetricsFilter(c *fiber.Ctx) (model.MetricsFilter, error) {
+	eventName := utils.Trim(c.Query("event_name"), ' ')
+	if eventName == "" {
+		return model.MetricsFilter{}, fiber.NewError(fiber.StatusBadRequest, "event_name is required")
+	}
+
+	groupBy := utils.Trim(c.Query("group_by", "channel"), ' ')
+
+	var from, to time.Time
+
+	if raw := utils.Trim(c.Query("from"), ' '); raw != "" {
+		sec, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			return model.MetricsFilter{}, fiber.NewError(fiber.StatusBadRequest, "invalid from timestamp")
+		}
+		from = time.Unix(sec, 0).UTC()
+	}
+
+	if raw := utils.Trim(c.Query("to"), ' '); raw != "" {
+		sec, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			return model.MetricsFilter{}, fiber.NewError(fiber.StatusBadRequest, "invalid to timestamp")
+		}
+		to = time.Unix(sec, 0).UTC()
+	}
+
+	var channel *string
+	if raw := utils.Trim(c.Query("channel"), ' '); raw != "" {
+		channel = &raw
+	}
+
+	return model.MetricsFilter{
+		EventName: eventName,
+		GroupBy:   groupBy,
+		From:      from,
+		To:        to,
+		Channel:   channel,
+	}, nil
 }

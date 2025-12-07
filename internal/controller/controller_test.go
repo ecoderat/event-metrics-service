@@ -34,6 +34,7 @@ func (s *ControllerTestSuite) SetupTest() {
 	ctrl := NewEventController(s.service)
 	s.app = fiber.New()
 	s.app.Post("/events", ctrl.CreateEvent)
+	s.app.Get("/metrics", ctrl.GetMetrics)
 }
 
 func (s *ControllerTestSuite) TestCreateEvent_Success() {
@@ -97,6 +98,46 @@ func (s *ControllerTestSuite) TestCreateEvent_ProcessError() {
 	resp := s.performRequest(reqBody)
 
 	require.Equal(s.T(), http.StatusInternalServerError, resp.StatusCode)
+}
+
+func (s *ControllerTestSuite) TestGetMetrics_Success() {
+	filterMatcher := mock.MatchedBy(func(f model.MetricsFilter) bool {
+		return f.EventName == "signup" && f.GroupBy == "channel"
+	})
+	expected := model.MetricsResponse{
+		Meta: model.MetricsMeta{
+			EventName: "signup",
+			GroupBy:   "channel",
+			Period:    model.MetricsPeriod{Start: time.Unix(0, 0).UTC().Format(time.RFC3339), End: time.Unix(0, 0).UTC().Format(time.RFC3339)},
+		},
+		Data: model.MetricsData{
+			TotalEventCount:  10,
+			UniqueEventCount: 3,
+			Groups: []model.MetricsGroup{
+				{Key: "web", TotalCount: 8, UniqueUserCount: 2},
+			},
+		},
+	}
+	s.service.On("GetMetrics", mock.Anything, filterMatcher).Return(expected, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics?event_name=signup", nil)
+	resp, err := s.app.Test(req, -1)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), http.StatusOK, resp.StatusCode)
+}
+
+func (s *ControllerTestSuite) TestGetMetrics_MissingEventName() {
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	resp, err := s.app.Test(req, -1)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), http.StatusBadRequest, resp.StatusCode)
+}
+
+func (s *ControllerTestSuite) TestGetMetrics_InvalidFrom() {
+	req := httptest.NewRequest(http.MethodGet, "/metrics?event_name=signup&from=not-a-time", nil)
+	resp, err := s.app.Test(req, -1)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), http.StatusBadRequest, resp.StatusCode)
 }
 
 func (s *ControllerTestSuite) performRequest(body any) *http.Response {
