@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"log"
 	"strconv"
 	"time"
 
@@ -46,23 +45,19 @@ func (h *eventController) CreateEvent(c *fiber.Ctx) error {
 
 // GetMetrics returns aggregated metrics for events.
 func (h *eventController) GetMetrics(c *fiber.Ctx) error {
-	log.Println("Received GetMetrics request")
 	filter, err := buildMetricsFilter(c)
 	if err != nil {
 		return err
 	}
-	log.Printf("Metrics filtered: %+v\n", filter)
-	log.Println("Fetching metrics from service")
+
 	resp, svcErr := h.eventService.GetMetrics(c.Context(), filter)
 	if svcErr != nil {
 		if _, ok := svcErr.(*service.ValidationError); ok {
-			log.Printf("Validation error: %v\n", svcErr)
 			return fiber.NewError(fiber.StatusBadRequest, svcErr.Error())
 		}
-		log.Printf("Service error: %v\n", svcErr)
+
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to fetch metrics")
 	}
-	log.Println("Metrics fetched successfully")
 
 	return c.JSON(resp)
 }
