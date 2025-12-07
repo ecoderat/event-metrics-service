@@ -17,9 +17,8 @@ func (m *Service) BuildEvent(req model.EventRequest) (model.Event, error) {
 	return args.Get(0).(model.Event), args.Error(1)
 }
 
-func (m *Service) ProcessEvent(ctx context.Context, event model.Event) (model.EventResult, error) {
-	args := m.Called(ctx, event)
-	return args.Get(0).(model.EventResult), args.Error(1)
+func (m *Service) ProcessEvent(ctx context.Context, event model.Event) {
+	m.Called(ctx, event)
 }
 
 func (m *Service) GetMetrics(ctx context.Context, filter model.MetricsFilter) (model.MetricsResponse, error) {

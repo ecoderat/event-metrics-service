@@ -39,12 +39,9 @@ func (h *eventController) CreateEvent(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	_, err = h.eventService.ProcessEvent(c.Context(), event)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to process event")
-	}
+	h.eventService.ProcessEvent(c.Context(), event)
 
-	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "accepted", "event": event})
+	return c.SendStatus(fiber.StatusAccepted)
 }
 
 // GetMetrics returns aggregated metrics for events.

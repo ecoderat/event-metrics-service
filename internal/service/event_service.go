@@ -28,7 +28,7 @@ type eventService struct {
 
 type EventService interface {
 	BuildEvent(req model.EventRequest) (model.Event, error)
-	ProcessEvent(ctx context.Context, event model.Event) (model.EventResult, error)
+	ProcessEvent(ctx context.Context, event model.Event)
 	GetMetrics(ctx context.Context, filter model.MetricsFilter) (model.MetricsResponse, error)
 }
 
@@ -91,9 +91,8 @@ func (s *eventService) BuildEvent(req model.EventRequest) (model.Event, error) {
 }
 
 // ProcessEvent persists a single event.
-func (s *eventService) ProcessEvent(ctx context.Context, event model.Event) (model.EventResult, error) {
+func (s *eventService) ProcessEvent(ctx context.Context, event model.Event) {
 	s.worker.Enqueue(event)
-	return model.EventResult{Status: "created"}, nil
 }
 
 // GetMetrics validates filters, sets defaults, and delegates aggregation to the repository.

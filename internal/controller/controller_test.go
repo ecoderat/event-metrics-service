@@ -52,14 +52,11 @@ func (s *ControllerTestSuite) TestCreateEvent_Success() {
 		Timestamp: now,
 	}
 	s.service.On("BuildEvent", reqBody).Return(ev, nil)
-	s.service.On("ProcessEvent", mock.Anything, ev).Return(model.EventResult{Status: "created"}, nil)
+	s.service.On("ProcessEvent", mock.Anything, ev).Return(nil)
 
 	resp := s.performRequest(reqBody)
 
 	require.Equal(s.T(), http.StatusAccepted, resp.StatusCode)
-	var body map[string]any
-	require.NoError(s.T(), json.NewDecoder(resp.Body).Decode(&body))
-	require.Equal(s.T(), "accepted", body["status"])
 }
 
 func (s *ControllerTestSuite) TestCreateEvent_InvalidJSON() {
@@ -93,7 +90,7 @@ func (s *ControllerTestSuite) TestCreateEvent_ProcessError() {
 	}
 	ev := model.Event{EventName: "signup", Channel: "web", UserID: "u1", Timestamp: now}
 	s.service.On("BuildEvent", reqBody).Return(ev, nil)
-	s.service.On("ProcessEvent", mock.Anything, ev).Return(model.EventResult{}, context.DeadlineExceeded)
+	s.service.On("ProcessEvent", mock.Anything, ev).Return(context.DeadlineExceeded)
 
 	resp := s.performRequest(reqBody)
 
