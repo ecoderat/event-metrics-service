@@ -4,6 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
+	routes "event-metrics-service/internal"
 	"event-metrics-service/internal/config"
 	"event-metrics-service/internal/controller"
 )
@@ -23,12 +24,7 @@ func NewServer(appCfg *config.Config, eventController controller.EventController
 	// app.Use(logger.New())
 	app.Use(recover.New())
 
-	app.Post("/events", eventController.CreateEvent)
-	app.Get("/metrics", eventController.GetMetrics)
-
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
-	})
+	routes.Register(app, eventController)
 
 	return &Server{app: app}
 }

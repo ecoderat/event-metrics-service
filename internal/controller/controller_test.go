@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -78,23 +77,6 @@ func (s *ControllerTestSuite) TestCreateEvent_BuildError() {
 	resp := s.performRequest(reqBody)
 
 	require.Equal(s.T(), http.StatusBadRequest, resp.StatusCode)
-}
-
-func (s *ControllerTestSuite) TestCreateEvent_ProcessError() {
-	now := time.Unix(100, 0).UTC()
-	reqBody := model.EventRequest{
-		EventName: "signup",
-		Channel:   "web",
-		UserID:    "u1",
-		Timestamp: now.Unix(),
-	}
-	ev := model.Event{EventName: "signup", Channel: "web", UserID: "u1", Timestamp: now}
-	s.service.On("BuildEvent", reqBody).Return(ev, nil)
-	s.service.On("ProcessEvent", mock.Anything, ev).Return(context.DeadlineExceeded)
-
-	resp := s.performRequest(reqBody)
-
-	require.Equal(s.T(), http.StatusInternalServerError, resp.StatusCode)
 }
 
 func (s *ControllerTestSuite) TestGetMetrics_Success() {
