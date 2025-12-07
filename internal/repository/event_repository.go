@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
-
 	"event-metrics-service/internal/model"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 // EventRepository defines database operations for events.
@@ -96,7 +96,7 @@ func (r *eventRepository) FetchMetrics(ctx context.Context, filter model.Metrics
 }
 
 func buildGroupQuery(groupBy, where string) (string, error) {
-	// SQL Injection koruması: Sadece izin verilen değerleri switch ile alıyoruz.
+	// SQL injection protection: only allowed values are accepted via switch.
 	switch groupBy {
 	case "channel":
 		return fmt.Sprintf(
