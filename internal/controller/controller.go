@@ -9,7 +9,6 @@ import (
 
 type EventController interface {
 	CreateEvent(c *fiber.Ctx) error
-	CreateBulkEvents(c *fiber.Ctx) error
 	GetMetrics(c *fiber.Ctx) error
 }
 
@@ -41,11 +40,6 @@ func (h *eventController) CreateEvent(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "accepted", "event": event})
-}
-
-// CreateBulkEvents ingests multiple events in one call.
-func (h *eventController) CreateBulkEvents(c *fiber.Ctx) error {
-	return nil
 }
 
 // GetMetrics returns aggregated metrics for events.

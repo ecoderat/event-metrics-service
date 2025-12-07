@@ -1,8 +1,6 @@
 package http
 
 import (
-	"strings"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
@@ -17,15 +15,12 @@ type Server struct {
 
 // NewServer configures routes and middleware.
 func NewServer(appCfg *config.Config, eventController controller.EventController) *Server {
-	isBenchmark := strings.ToLower(appCfg.AppMode) == "benchmark"
 	fiberCfg := fiber.Config{
 		DisableStartupMessage: true,
 		Prefork:               appCfg.FiberPrefork,
 	}
 	app := fiber.New(fiberCfg)
-	if !isBenchmark {
-		// app.Use(logger.New())
-	}
+	// app.Use(logger.New())
 	app.Use(recover.New())
 
 	app.Post("/events", eventController.CreateEvent)

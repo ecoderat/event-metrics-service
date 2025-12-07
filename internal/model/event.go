@@ -15,11 +15,6 @@ type EventRequest struct {
 	Metadata   map[string]interface{} `json:"metadata"`
 }
 
-// BulkEventsRequest holds a list of events for bulk ingestion.
-type BulkEventsRequest struct {
-	Events []EventRequest `json:"events"`
-}
-
 // Event is the domain model persisted in the database.
 type Event struct {
 	ID         int64
@@ -36,20 +31,6 @@ type Event struct {
 type EventResult struct {
 	Status string `json:"status"`
 	ID     *int64 `json:"id,omitempty"`
-}
-
-// BulkInsertResult summarizes a bulk ingestion attempt.
-type BulkInsertResult struct {
-	Inserted   int         `json:"inserted"`
-	Duplicates int         `json:"duplicates"`
-	Failed     int         `json:"failed"`
-	Errors     []BulkError `json:"errors,omitempty"`
-}
-
-// BulkError captures per-item validation failures.
-type BulkError struct {
-	Index int    `json:"index"`
-	Error string `json:"error"`
 }
 
 // MetricsFilter represents metrics query filters.

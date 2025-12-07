@@ -5,7 +5,6 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
-	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 
@@ -37,8 +36,8 @@ func main() {
 	}
 
 	repo := repository.NewEventRepository(conn)
-	worker := service.NewbatchEventWorker(repo, 10000, 1000, 1*time.Second)
-	eventService := service.NewEventService(repo, worker)
+	worker := service.NewbatchEventWorker(repo, cfg.WorkerBufferSize, cfg.WorkerBatchSize, cfg.WorkerFlushEvery)
+	eventService := service.NewEventService(repo, worker, cfg.FutureTolerance)
 	eventController := controller.NewEventController(eventService)
 
 	server := httpserver.NewServer(cfg, eventController)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -42,12 +41,8 @@ func NewConnection(ctx context.Context, cfg *config.Config) (clickhouse.Conn, er
 		return nil, fmt.Errorf("open clickhouse: %w", err)
 	}
 
-	if err := waitForPing(ctx, conn, 20, 1500*time.Millisecond); err != nil {
+	if err := waitForPing(ctx, conn, cfg.HealthPingRetries, cfg.HealthPingDelay); err != nil {
 		return nil, err
-	}
-
-	if cfg.AppMode == "benchmark" {
-		log.Printf("clickhouse connected: addrs=%v max_conns=%d min_conns=%d", cfg.ClickHouseAddrs, cfg.DBMaxConns, cfg.DBMinConns)
 	}
 
 	return conn, nil
@@ -55,6 +50,12 @@ func NewConnection(ctx context.Context, cfg *config.Config) (clickhouse.Conn, er
 
 // waitForPing retries Ping to allow the DB container to become ready.
 func waitForPing(ctx context.Context, conn clickhouse.Conn, attempts int, delay time.Duration) error {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	if delay <= 0 {
+		delay = 1500 * time.Millisecond
+	}
 	wait := delay
 	for i := 1; i <= attempts; i++ {
 		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

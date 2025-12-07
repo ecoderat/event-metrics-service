@@ -22,6 +22,12 @@ type Config struct {
 	DBMinConns        int
 	DBMaxConnLifetime time.Duration
 	DBMaxConnIdleTime time.Duration
+	FutureTolerance   time.Duration
+	WorkerBufferSize  int
+	WorkerBatchSize   int
+	WorkerFlushEvery  time.Duration
+	HealthPingRetries int
+	HealthPingDelay   time.Duration
 }
 
 // Load reads configuration from environment variables with sane defaults.
@@ -39,6 +45,12 @@ func Load() (*Config, error) {
 		DBMinConns:        parseIntEnv("DB_MIN_CONNS", 10),
 		DBMaxConnLifetime: parseDurationEnv("DB_MAX_CONN_LIFETIME", 30*time.Minute),
 		DBMaxConnIdleTime: parseDurationEnv("DB_MAX_CONN_IDLE_TIME", 5*time.Minute),
+		FutureTolerance:   parseDurationEnv("FUTURE_TOLERANCE", 0),
+		WorkerBufferSize:  parseIntEnv("WORKER_BUFFER_SIZE", 10000),
+		WorkerBatchSize:   parseIntEnv("WORKER_BATCH_SIZE", 1000),
+		WorkerFlushEvery:  parseDurationEnv("WORKER_FLUSH_EVERY", time.Second),
+		HealthPingRetries: parseIntEnv("DB_PING_RETRIES", 20),
+		HealthPingDelay:   parseDurationEnv("DB_PING_DELAY", 1500*time.Millisecond),
 	}
 
 	if len(cfg.ClickHouseAddrs) == 0 || cfg.ClickHouseAddrs[0] == "" {

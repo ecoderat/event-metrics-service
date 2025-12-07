@@ -9,11 +9,6 @@ import (
 	"event-metrics-service/internal/repository"
 )
 
-const (
-	defaultBulkLimit = 1000
-	futureTolerance  = 5 * time.Minute
-)
-
 // ValidationError represents user input issues.
 type ValidationError struct {
 	Message string
@@ -25,10 +20,10 @@ func (e *ValidationError) Error() string {
 
 // eventService wires business logic for events and metrics.
 type eventService struct {
-	repo      repository.EventRepository
-	worker    BatchEventWorker
-	bulkLimit int
-	now       func() time.Time
+	repo            repository.EventRepository
+	worker          BatchEventWorker
+	now             func() time.Time
+	futureTolerance time.Duration
 }
 
 type EventService interface {
@@ -37,12 +32,12 @@ type EventService interface {
 }
 
 // NewEventService constructs an eventService.
-func NewEventService(repo repository.EventRepository, worker BatchEventWorker) EventService {
+func NewEventService(repo repository.EventRepository, worker BatchEventWorker, futureTolerance time.Duration) EventService {
 	return &eventService{
-		repo:      repo,
-		worker:    worker,
-		bulkLimit: defaultBulkLimit,
-		now:       time.Now,
+		repo:            repo,
+		worker:          worker,
+		now:             time.Now,
+		futureTolerance: futureTolerance,
 	}
 }
 
@@ -65,8 +60,10 @@ func (s *eventService) BuildEvent(req model.EventRequest) (model.Event, error) {
 	}
 
 	ts := time.Unix(req.Timestamp, 0).UTC()
-	if ts.After(s.now().Add(futureTolerance)) {
-		return model.Event{}, &ValidationError{Message: "timestamp cannot be in the future"}
+	if s.futureTolerance > 0 {
+		if err := ValidateTimestamp(ts, s.now(), s.futureTolerance); err != nil {
+			return model.Event{}, &ValidationError{Message: err.Error()}
+		}
 	}
 
 	tags := req.Tags
@@ -103,8 +100,11 @@ func (s *eventService) CreateEvent(ctx context.Context, input model.Event) error
 }
 
 // ValidateTimestamp ensures timestamps are not too far in the future.
-func ValidateTimestamp(ts time.Time, now time.Time) error {
-	if ts.After(now.Add(futureTolerance)) {
+func ValidateTimestamp(ts time.Time, now time.Time, tolerance time.Duration) error {
+	if tolerance <= 0 {
+		return nil
+	}
+	if ts.After(now.Add(tolerance)) {
 		return errors.New("timestamp cannot be in the future")
 	}
 	return nil
