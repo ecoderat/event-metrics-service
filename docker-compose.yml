@@ -1,16 +1,17 @@
 version: "3.9"
 
 services:
-  db:
-    image: postgres:15
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
     environment:
-      POSTGRES_DB: events
-      POSTGRES_USER: event
-      POSTGRES_PASSWORD: event
+      CLICKHOUSE_DB: events
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: event
     ports:
-      - "5432:5432"
+      - "9000:9000"
+      - "8123:8123"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - chdata:/var/lib/clickhouse
     ulimits:
       nofile:
         soft: 65536
@@ -19,12 +20,15 @@ services:
   app:
     build: .
     environment:
-      DATABASE_URL: postgres://event:event@db:5432/events?sslmode=disable
+      CLICKHOUSE_ADDRS: clickhouse:9000
+      CLICKHOUSE_DB: events
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: event
       HTTP_PORT: :8080
     ports:
       - "8080:8080"
     depends_on:
-      - db
+      - clickhouse
     # Run migrations manually before starting the app in production
     ulimits:
       nofile:
@@ -45,4 +49,4 @@ services:
 
 
 volumes:
-  pgdata:
+  chdata:

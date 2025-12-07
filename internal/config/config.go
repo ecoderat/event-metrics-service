@@ -11,11 +11,15 @@ import (
 // Config holds application configuration loaded from environment variables.
 type Config struct {
 	HTTPPort          string
-	DatabaseURL       string
 	AppMode           string
 	FiberPrefork      bool
-	DBMaxConns        int32
-	DBMinConns        int32
+	ClickHouseAddrs   []string
+	ClickHouseUser    string
+	ClickHousePass    string
+	ClickHouseDB      string
+	UseTLS            bool
+	DBMaxConns        int
+	DBMinConns        int
 	DBMaxConnLifetime time.Duration
 	DBMaxConnIdleTime time.Duration
 }
@@ -26,14 +30,19 @@ func Load() (*Config, error) {
 		HTTPPort:          getEnv("HTTP_PORT", ":8080"),
 		AppMode:           strings.ToLower(getEnv("APP_MODE", "dev")),
 		FiberPrefork:      parseBoolEnv("FIBER_PREFORK", false),
-		DBMaxConns:        parseInt32Env("DB_MAX_CONNS", 50),
-		DBMinConns:        parseInt32Env("DB_MIN_CONNS", 10),
+		ClickHouseAddrs:   splitAndTrim(getEnv("CLICKHOUSE_ADDRS", "localhost:9000")),
+		ClickHouseUser:    getEnv("CLICKHOUSE_USER", "default"),
+		ClickHousePass:    os.Getenv("CLICKHOUSE_PASSWORD"),
+		ClickHouseDB:      getEnv("CLICKHOUSE_DB", "default"),
+		UseTLS:            parseBoolEnv("CLICKHOUSE_TLS", false),
+		DBMaxConns:        parseIntEnv("DB_MAX_CONNS", 50),
+		DBMinConns:        parseIntEnv("DB_MIN_CONNS", 10),
 		DBMaxConnLifetime: parseDurationEnv("DB_MAX_CONN_LIFETIME", 30*time.Minute),
 		DBMaxConnIdleTime: parseDurationEnv("DB_MAX_CONN_IDLE_TIME", 5*time.Minute),
 	}
-	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
-	if cfg.DatabaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required")
+
+	if len(cfg.ClickHouseAddrs) == 0 || cfg.ClickHouseAddrs[0] == "" {
+		return nil, fmt.Errorf("CLICKHOUSE_ADDRS is required")
 	}
 	return cfg, nil
 }
@@ -79,6 +88,18 @@ func parseIntEnv(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func splitAndTrim(raw string) []string {
+	parts := strings.Split(raw, ",")
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func parseDurationEnv(key string, fallback time.Duration) time.Duration {

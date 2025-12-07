@@ -22,15 +22,14 @@ type BulkEventsRequest struct {
 
 // Event is the domain model persisted in the database.
 type Event struct {
-	ID             int64
-	IdempotencyKey string
-	EventName      string
-	Channel        string
-	CampaignID     string
-	UserID         string
-	Timestamp      time.Time
-	Tags           []string
-	Metadata       map[string]interface{}
+	ID         int64
+	EventName  string
+	Channel    string
+	CampaignID string
+	UserID     string
+	Timestamp  time.Time
+	Tags       []string
+	Metadata   map[string]interface{}
 }
 
 // EventResult describes the outcome of an insert.

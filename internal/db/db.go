@@ -2,40 +2,74 @@ package db
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/ClickHouse/clickhouse-go/v2"
 
 	"event-metrics-service/internal/config"
 )
 
-// NewPool creates a PostgreSQL connection pool configured with sane defaults.
-func NewPool(ctx context.Context, dbURL string, cfg *config.Config) (*pgxpool.Pool, error) {
-	pgxCfg, err := pgxpool.ParseConfig(dbURL)
+// NewConnection creates a ClickHouse connection with pool settings.
+func NewConnection(ctx context.Context, cfg *config.Config) (clickhouse.Conn, error) {
+	options := &clickhouse.Options{
+		Addr: cfg.ClickHouseAddrs,
+		Auth: clickhouse.Auth{
+			Database: cfg.ClickHouseDB,
+			Username: cfg.ClickHouseUser,
+			Password: cfg.ClickHousePass,
+		},
+		TLS: func() *tls.Config {
+			if cfg.UseTLS {
+				return &tls.Config{InsecureSkipVerify: true} // controlled via env flag
+			}
+			return nil
+		}(),
+		ConnOpenStrategy: clickhouse.ConnOpenInOrder,
+		ConnMaxLifetime:  cfg.DBMaxConnLifetime,
+		MaxOpenConns:     cfg.DBMaxConns,
+		MaxIdleConns:     cfg.DBMinConns,
+		DialTimeout:      5 * time.Second,
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60,
+		},
+	}
+
+	conn, err := clickhouse.Open(options)
 	if err != nil {
-		return nil, fmt.Errorf("parse db config: %w", err)
+		return nil, fmt.Errorf("open clickhouse: %w", err)
 	}
 
-	pgxCfg.MinConns = cfg.DBMinConns
-	pgxCfg.MaxConns = cfg.DBMaxConns
-	pgxCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
-	pgxCfg.MaxConnIdleTime = cfg.DBMaxConnIdleTime
-	pgxCfg.HealthCheckPeriod = 30 * time.Second
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.NewWithConfig(ctx, pgxCfg)
-	if err != nil {
-		return nil, fmt.Errorf("connect db: %w", err)
+	if err := waitForPing(ctx, conn, 20, 1500*time.Millisecond); err != nil {
+		return nil, err
 	}
 
-	if strings.ToLower(cfg.AppMode) == "benchmark" {
-		log.Printf("db pool configured: max_conns=%d min_conns=%d max_conn_lifetime=%s max_conn_idle=%s", pgxCfg.MaxConns, pgxCfg.MinConns, pgxCfg.MaxConnLifetime, pgxCfg.MaxConnIdleTime)
+	if cfg.AppMode == "benchmark" {
+		log.Printf("clickhouse connected: addrs=%v max_conns=%d min_conns=%d", cfg.ClickHouseAddrs, cfg.DBMaxConns, cfg.DBMinConns)
 	}
 
-	return pool, nil
+	return conn, nil
+}
+
+// waitForPing retries Ping to allow the DB container to become ready.
+func waitForPing(ctx context.Context, conn clickhouse.Conn, attempts int, delay time.Duration) error {
+	wait := delay
+	for i := 1; i <= attempts; i++ {
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := conn.Ping(pingCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if i == attempts {
+			return fmt.Errorf("ping clickhouse: %w", err)
+		}
+		time.Sleep(wait)
+		if wait < 5*time.Second {
+			wait += 500 * time.Millisecond
+		}
+	}
+	return fmt.Errorf("ping clickhouse: exceeded retries")
 }

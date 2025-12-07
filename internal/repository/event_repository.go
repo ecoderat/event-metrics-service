@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/ClickHouse/clickhouse-go/v2"
 
 	"event-metrics-service/internal/model"
 )
@@ -16,7 +15,7 @@ type EventRepository interface {
 	// Create inserts a single event.
 	Create(ctx context.Context, event model.Event) error
 
-	// CreateBatch inserts multiple events efficiently using pgx.Batch.
+	// CreateBatch inserts multiple events efficiently using ClickHouse batches.
 	CreateBatch(ctx context.Context, events []model.Event) error
 
 	// FetchMetrics aggregates data based on filters.
@@ -24,18 +23,17 @@ type EventRepository interface {
 }
 
 type eventRepository struct {
-	pool *pgxpool.Pool
+	conn clickhouse.Conn
 }
 
-// NewEventRepository creates an EventRepository backed by PostgreSQL.
-func NewEventRepository(pool *pgxpool.Pool) EventRepository {
-	return &eventRepository{pool: pool}
+// NewEventRepository creates an EventRepository backed by ClickHouse.
+func NewEventRepository(conn clickhouse.Conn) EventRepository {
+	return &eventRepository{conn: conn}
 }
 
 const insertEventQuery = `
-	INSERT INTO events (idempotency_key, event_name, channel, campaign_id, user_id, ts, tags, metadata)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	ON CONFLICT (idempotency_key) DO NOTHING
+	INSERT INTO events (event_name, channel, campaign_id, user_id, ts, tags, metadata)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 func (r *eventRepository) Create(ctx context.Context, event model.Event) error {
@@ -44,8 +42,7 @@ func (r *eventRepository) Create(ctx context.Context, event model.Event) error {
 		return err
 	}
 
-	_, err = r.pool.Exec(ctx, insertEventQuery,
-		event.IdempotencyKey,
+	err = r.conn.Exec(ctx, insertEventQuery,
 		event.EventName,
 		event.Channel,
 		nullIfEmpty(event.CampaignID),
@@ -63,13 +60,10 @@ func (r *eventRepository) CreateBatch(ctx context.Context, events []model.Event)
 		return nil
 	}
 
-	batch := &pgx.Batch{}
-
-	query := `
-		INSERT INTO events (idempotency_key, event_name, channel, campaign_id, user_id, ts, tags, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (idempotency_key) DO NOTHING
-	`
+	batch, err := r.conn.PrepareBatch(ctx, insertEventQuery)
+	if err != nil {
+		return fmt.Errorf("prepare batch: %w", err)
+	}
 
 	for _, event := range events {
 		metadata, err := marshalMetadata(event.Metadata)
@@ -77,8 +71,7 @@ func (r *eventRepository) CreateBatch(ctx context.Context, events []model.Event)
 			return err
 		}
 
-		batch.Queue(query,
-			event.IdempotencyKey,
+		if err := batch.Append(
 			event.EventName,
 			event.Channel,
 			nullIfEmpty(event.CampaignID),
@@ -86,17 +79,13 @@ func (r *eventRepository) CreateBatch(ctx context.Context, events []model.Event)
 			event.Timestamp,
 			event.Tags,
 			metadata,
-		)
+		); err != nil {
+			return fmt.Errorf("append batch: %w", err)
+		}
 	}
 
-	br := r.pool.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for range events {
-		_, err := br.Exec()
-		if err != nil {
-			return fmt.Errorf("batch execution error: %w", err)
-		}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send batch: %w", err)
 	}
 
 	return nil
@@ -126,15 +115,15 @@ func buildGroupQuery(groupBy, where string) (string, error) {
 	}
 }
 
-func marshalMetadata(metadata map[string]interface{}) ([]byte, error) {
+func marshalMetadata(metadata map[string]interface{}) (string, error) {
 	if metadata == nil {
-		return nil, nil // JSONB null
+		return "{}", nil
 	}
 	b, err := json.Marshal(metadata)
 	if err != nil {
-		return nil, fmt.Errorf("marshal metadata: %w", err)
+		return "", fmt.Errorf("marshal metadata: %w", err)
 	}
-	return b, nil
+	return string(b), nil
 }
 
 func nullIfEmpty(val string) interface{} {

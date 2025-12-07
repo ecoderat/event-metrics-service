@@ -18,10 +18,11 @@ import (
 )
 
 type Config struct {
-	Endpoint    string
-	Total       int
-	Rate        int
-	Concurrency int
+	Endpoint           string
+	Total              int
+	Rate               int
+	Concurrency        int
+	DuplicationPercent int
 }
 
 func parseFlags() *Config {
@@ -30,6 +31,7 @@ func parseFlags() *Config {
 	flag.IntVar(&c.Total, "total", 10000, "Total requests")
 	flag.IntVar(&c.Rate, "rate", 2000, "Requests per second")
 	flag.IntVar(&c.Concurrency, "concurrency", 0, "Worker count (0=auto)")
+	flag.IntVar(&c.DuplicationPercent, "duplication-percent", 0, "Duplication percent (0 = no duplicates)")
 	flag.Parse()
 
 	if c.Endpoint == "" {
@@ -44,6 +46,13 @@ func parseFlags() *Config {
 			c.Concurrency = 50
 		}
 	}
+
+	if c.DuplicationPercent > 100 {
+		c.DuplicationPercent = 100
+	} else if c.DuplicationPercent < 0 {
+		c.DuplicationPercent = 0
+	}
+
 	return c
 }
 
@@ -51,6 +60,36 @@ type Stats struct {
 	ok      uint64
 	errors  uint64
 	latency int64 // microseconds
+}
+
+type EventPool struct {
+	mu  sync.RWMutex
+	buf []map[string]any
+	max int
+}
+
+func NewEventPool(max int) *EventPool {
+	return &EventPool{buf: make([]map[string]any, 0, max), max: max}
+}
+
+func (p *EventPool) Add(evt map[string]any) {
+	clone := cloneEvent(evt)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.buf) >= p.max {
+		p.buf = p.buf[1:]
+	}
+	p.buf = append(p.buf, clone)
+}
+
+func (p *EventPool) GetRandom(rng *rand.Rand) (map[string]any, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.buf) == 0 {
+		return nil, false
+	}
+	idx := rng.Intn(len(p.buf))
+	return cloneEvent(p.buf[idx]), true
 }
 
 func (s *Stats) AddOK(duration time.Duration) {
@@ -94,6 +133,7 @@ func (s *Stats) StartLogger(ctx context.Context) {
 func main() {
 	cfg := parseFlags()
 	stats := &Stats{}
+	pool := NewEventPool(10000)
 
 	// High-performance HTTP Client
 	client := &http.Client{
@@ -120,11 +160,16 @@ func main() {
 	// Job Queue
 	jobs := make(chan struct{}, cfg.Rate*2)
 	var wg sync.WaitGroup
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rngs := make([]*rand.Rand, cfg.Concurrency)
+	for i := 0; i < cfg.Concurrency; i++ {
+		rngs[i] = rand.New(rand.NewSource(rng.Int63()))
+	}
 
 	// Workers
 	for i := 0; i < cfg.Concurrency; i++ {
 		wg.Add(1)
-		go startWorker(client, cfg.Endpoint, jobs, stats, &wg)
+		go startWorker(client, cfg.Endpoint, jobs, stats, pool, cfg.DuplicationPercent, rngs[i], &wg)
 	}
 
 	// Rate Limiter (Main Loop)
@@ -153,13 +198,13 @@ func main() {
 	log.Printf("DONE. Total OK: %d | Total Errors: %d", atomic.LoadUint64(&stats.ok), atomic.LoadUint64(&stats.errors))
 }
 
-func startWorker(client *http.Client, endpoint string, jobs <-chan struct{}, stats *Stats, wg *sync.WaitGroup) {
+func startWorker(client *http.Client, endpoint string, jobs <-chan struct{}, stats *Stats, pool *EventPool, dupPercent int, rng *rand.Rand, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	headers := http.Header{"Content-Type": []string{"application/json"}}
 
 	for range jobs {
-		event := generateRandomEvent()
+		event := pickEvent(rng, pool, dupPercent)
 		start := time.Now()
 
 		err := sendEvent(client, endpoint, event, headers)
@@ -199,17 +244,51 @@ var (
 	currencies = []string{"TRY", "USD", "EUR"}
 )
 
-func generateRandomEvent() map[string]any {
+func pickEvent(rng *rand.Rand, pool *EventPool, dupPercent int) map[string]any {
+	if dupPercent > 0 && rng.Intn(100) < dupPercent {
+		if evt, ok := pool.GetRandom(rng); ok {
+			return evt
+		}
+	}
+	evt := generateRandomEvent(rng)
+	pool.Add(evt)
+	return evt
+}
+
+func generateRandomEvent(rng *rand.Rand) map[string]any {
 	return map[string]any{
-		"event_name":  eventNames[rand.Intn(len(eventNames))],
-		"channel":     channels[rand.Intn(len(channels))],
-		"campaign_id": fmt.Sprintf("cmp_%03d", rand.Intn(100)),
-		"user_id":     fmt.Sprintf("user_%d", rand.Intn(100000)),
-		"timestamp":   time.Now().Unix() - int64(rand.Intn(60)), // Last 60 seconds
+		"event_name":  eventNames[rng.Intn(len(eventNames))],
+		"channel":     channels[rng.Intn(len(channels))],
+		"campaign_id": fmt.Sprintf("cmp_%03d", rng.Intn(100)),
+		"user_id":     fmt.Sprintf("user_%d", rng.Intn(100000)),
+		"timestamp":   time.Now().Unix() - int64(rng.Intn(60)), // Last 60 seconds
 		"tags":        []string{"electronics", "sale"},
 		"metadata": map[string]any{
-			"price":    rand.Float64() * 100,
-			"currency": currencies[rand.Intn(len(currencies))],
+			"price":    rng.Float64() * 100,
+			"currency": currencies[rng.Intn(len(currencies))],
 		},
 	}
+}
+
+func cloneEvent(evt map[string]any) map[string]any {
+	if evt == nil {
+		return nil
+	}
+	clone := make(map[string]any, len(evt))
+	for k, v := range evt {
+		switch val := v.(type) {
+		case []string:
+			cpy := append([]string(nil), val...)
+			clone[k] = cpy
+		case map[string]any:
+			nested := make(map[string]any, len(val))
+			for nk, nv := range val {
+				nested[nk] = nv
+			}
+			clone[k] = nested
+		default:
+			clone[k] = v
+		}
+	}
+	return clone
 }

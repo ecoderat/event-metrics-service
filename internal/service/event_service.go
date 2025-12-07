@@ -2,10 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
 
 	"event-metrics-service/internal/model"
@@ -72,6 +69,11 @@ func (s *eventService) BuildEvent(req model.EventRequest) (model.Event, error) {
 		return model.Event{}, &ValidationError{Message: "timestamp cannot be in the future"}
 	}
 
+	tags := req.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	campaignID := ""
 	if req.CampaignID != nil {
 		campaignID = *req.CampaignID
@@ -83,11 +85,9 @@ func (s *eventService) BuildEvent(req model.EventRequest) (model.Event, error) {
 		CampaignID: campaignID,
 		UserID:     req.UserID,
 		Timestamp:  ts,
-		Tags:       req.Tags,
+		Tags:       tags,
 		Metadata:   req.Metadata,
 	}
-
-	event.IdempotencyKey = buildIdempotencyKey(event.UserID, event.EventName, event.Channel, event.Timestamp, event.CampaignID)
 
 	return event, nil
 }
@@ -100,17 +100,6 @@ func (s *eventService) ProcessEvent(ctx context.Context, event model.Event) (mod
 
 func (s *eventService) CreateEvent(ctx context.Context, input model.Event) error {
 	return nil
-}
-
-func buildIdempotencyKey(userID, eventName, channel string, ts time.Time, campaignID string) string {
-	raw := fmt.Sprintf("%s|%s|%s|%d|%s", userID, eventName, channel, ts.Unix(), campaignID)
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:])
-}
-
-// GenerateIdempotencyKey is exported for tests.
-func GenerateIdempotencyKey(userID, eventName, channel string, ts time.Time, campaignID string) string {
-	return buildIdempotencyKey(userID, eventName, channel, ts, campaignID)
 }
 
 // ValidateTimestamp ensures timestamps are not too far in the future.
