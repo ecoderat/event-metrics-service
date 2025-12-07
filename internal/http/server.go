@@ -4,9 +4,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
-	routes "event-metrics-service/internal"
 	"event-metrics-service/internal/config"
 	"event-metrics-service/internal/controller"
+	routes "event-metrics-service/internal/routes"
 )
 
 // Server wraps the Fiber application setup.
